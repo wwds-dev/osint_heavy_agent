@@ -8,6 +8,5 @@ Status: `IDEA` · `CONSIDERING` · `PLANNED` · `DONE` · `REJECTED`
 
 | # | Suggestion | Category | Effort | Status |
 |---|---|---|---|---|
-
-No open suggestions yet — see sentinel_fork's own SUGGESTIONS.md for ideas that
-are still shared across agents rather than specific to Bloodhound.
+| 1 | Show the evidence behind the threat and confidence scores inline | design | M | PLANNED |
+| 2 | Flag when a dossier section rests on a single source | design | S | IDEA |

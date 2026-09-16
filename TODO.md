@@ -9,8 +9,5 @@
 
 ## v1 — current
 
-No items yet. Bloodhound's own backlog was split out of sentinel_fork's shared
-TODO.md on 2026-09-14 (see that project's TODO.md/SUGGESTIONS.md for the still
-mostly-shared cross-cutting work — request-guard, main.py refactor, GUI system
-— that touches every agent, Bloodhound included, rather than one specifically).
-Add items here going forward as Bloodhound-specific work comes up.
+- [ ] `P2` `design` `@ai` The threat and confidence scores need their derivation shown. A dossier carrying a number a reader cannot trace back to evidence invites more trust than it has earned.
+- [ ] `P2` `feature` `security` `@ai` Metadata and rule matching, staged. Was one line of a four-agent "staged specialist integrations" item in the parent list, which is not a thing anyone works on. Excludes denial of service, credential theft, stealth/persistence and uncontrolled exploitation. *(split out of sentinel_fork/TODO.md)*
