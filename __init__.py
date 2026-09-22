@@ -175,14 +175,78 @@ TONE AND STANDARDS
 
 
 import json as _json
+import re as _re
 
 try:
     from providers import domain_lookup   as _domain_prov
     from providers import email_lookup    as _email_prov
     from providers import username_lookup as _username_prov
+    from providers import company_lookup  as _company_prov
     _PROVIDERS_OK = True
 except ImportError:
     _PROVIDERS_OK = False
+
+
+_EMAIL_RE = _re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_IPV4_RE = _re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
+_DOMAIN_RE = _re.compile(r"^(?=.{1,253}$)(?:[A-Za-z0-9-]{1,63}\.)+[A-Za-z]{2,}$")
+
+
+def _detect_from_target(target: str) -> str:
+    """Best-effort canonical type for an auto-detect / unknown label."""
+    text = (target or "").strip()
+    if not text:
+        return "unknown"
+    if _EMAIL_RE.match(text):
+        return "email"
+    if _IPV4_RE.match(text):
+        return "domain"  # the domain provider resolves IPs too
+    host = text.split("//")[-1].split("/")[0].split("@")[-1].split(":")[0]
+    if _DOMAIN_RE.match(host):
+        return "domain"
+    if " " not in text and "@" not in text:
+        return "username"
+    return "person"
+
+
+def _normalize_target_type(target: str, target_type: str) -> str:
+    """Map a UI label (e.g. "Email Address", "Domain / IP", "Auto-detect") or a
+    bare token to the canonical dispatch key used by ``_run_providers``.
+
+    The Bloodhound panel passes the combobox label verbatim, so without this
+    normalisation "Email Address" and "Domain / IP" never matched the old
+    lowercase tokens and live collection silently no-opped.
+    """
+    raw = (target_type or "").strip().lower()
+    compact = _re.sub(r"[^a-z]", "", raw)  # "domain / ip" -> "domainip"
+    if not compact or "auto" in compact:
+        return _detect_from_target(target)
+    if "email" in compact:
+        return "email"
+    if "username" in compact:
+        return "username"
+    if "domain" in compact or compact == "ip" or "ipaddress" in compact:
+        return "domain"
+    if "organisation" in compact or "organization" in compact or "company" in compact or compact == "org":
+        return "organisation"
+    if "person" in compact or "people" in compact:
+        return "person"
+    if "phone" in compact:
+        return "phone"
+    return _detect_from_target(target)
+
+
+def real_source_count(live_results: list[dict]) -> int:
+    """Number of public sources actually contacted during live collection.
+
+    This is a real count derived from each provider's ``sources_contacted``
+    list — never the model's self-declared "SOURCES REFERENCED" estimate.
+    """
+    total = 0
+    for result in live_results or []:
+        if isinstance(result, dict):
+            total += len(result.get("sources_contacted") or [])
+    return total
 
 
 def _run_providers(target: str, target_type: str) -> list[dict]:
@@ -190,20 +254,30 @@ def _run_providers(target: str, target_type: str) -> list[dict]:
     Dispatch live lookups based on target_type.
 
     Returns a list of provider result dicts (errors captured inside each dict,
-    never raised — build_messages must not crash on provider failures).
+    never raised — collection must not crash on provider failures). Accepts
+    either a UI label ("Email Address", "Domain / IP", "Auto-detect", …) or a
+    bare canonical token; both are normalised first.
     """
     if not _PROVIDERS_OK:
         return []
 
     collected: list[dict] = []
-    tt = target_type.strip().lower()
+    tt = _normalize_target_type(target, target_type)
 
-    # ── Domain / IP / Organisation ─────────────────────────────────────────
-    if tt in ("domain", "ip", "organisation", "organization"):
+    # ── Domain / IP ────────────────────────────────────────────────────────
+    if tt == "domain":
         try:
             collected.append(_domain_prov.lookup(target))
         except Exception as exc:
             collected.append({"type": "domain", "query": target,
+                               "error": f"provider exception: {exc}"})
+
+    # ── Organisation — use the legal-entity registry, not domain WHOIS ──────
+    elif tt == "organisation":
+        try:
+            collected.append(_company_prov.lookup(target))
+        except Exception as exc:
+            collected.append({"type": "company", "query": target,
                                "error": f"provider exception: {exc}"})
 
     # ── Email ──────────────────────────────────────────────────────────────
@@ -240,8 +314,9 @@ def _run_providers(target: str, target_type: str) -> list[dict]:
                                    "error": f"provider exception: {exc}"})
 
     # ── Phone / other ──────────────────────────────────────────────────────
-    # No zero-cost provider available yet; return empty so the LLM uses
-    # its methodology guidance for those target types.
+    # No zero-cost provider available (people-search / phone brokers are
+    # deliberately not used); return empty so the LLM falls back to its
+    # methodology guidance and the Sources gauge honestly shows 0 contacted.
 
     return collected
 
@@ -251,6 +326,21 @@ class OsintHeavyAgent:
 
     def __init__(self):
         self.name = "osint_heavy"
+        self.last_live_results: list[dict] = []
+        self.last_source_count: int = 0
+
+    def collect_live(self, target: str, target_type: str) -> list[dict]:
+        """Run the real live lookups for this target and remember the outcome.
+
+        Separated from ``build_messages`` so that (a) message construction stays
+        offline and unit-testable without network access, and (b) the panel can
+        drive the Sources gauge from the real number of sources contacted rather
+        than the model's self-declared estimate.
+        """
+        results = _run_providers(target, target_type)
+        self.last_live_results = results
+        self.last_source_count = real_source_count(results)
+        return results
 
     def build_messages(
         self,
@@ -259,6 +349,7 @@ class OsintHeavyAgent:
         scope: str,
         objective: str,
         image_metadata: str = "",
+        live_results: list[dict] | None = None,
     ) -> list[dict]:
         scope_hint = {
             "Quick Scan": "This is a Quick Scan — be concise, 3–5 points per section, highest-priority tools only.",
@@ -266,8 +357,11 @@ class OsintHeavyAgent:
             "Deep Dive": "This is a Deep Dive — exhaustive analysis, enumerate every lead, surface every pivot point.",
         }.get(scope, "Standard Investigation.")
 
-        # ── Live OSINT collection (runs before LLM call) ──────────────────
-        live_results = _run_providers(target, target_type)
+        # ── Live OSINT data (collected separately via collect_live) ───────
+        # build_messages is intentionally offline: it injects whatever real
+        # results the caller supplies but never performs network lookups here.
+        if live_results is None:
+            live_results = []
 
         user_parts = [
             f"TARGET IDENTIFIER: {target}",
