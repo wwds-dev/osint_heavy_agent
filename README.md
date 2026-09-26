@@ -44,12 +44,14 @@ arbitrary remote commands are not executed inside Sentinel or by its AI worker.
 `## 1. OVERVIEW` (with `THREAT LEVEL: X/10`, `CONFIDENCE: X%`, `SOURCES REFERENCED: X`) · `## 2. DIGITAL FOOTPRINT` · `## 3. INFRASTRUCTURE / SOCIAL PROFILE` · `## 4. RISK & RED FLAGS` · `## 5. METHODOLOGY & TOOLS`. Sidebar indicators (threat bar, confidence, sources) are regex-parsed from those exact lines.
 
 ## How it works
-`OsintHeavyAgent.build_messages(target, target_type, scope, objective, image_metadata)` assembles the target + scope hint + optional EXIF block. The system prompt carries the full tool library and the strict section format the UI depends on.
+Live collection and message-building are separate calls. `OsintHeavyAgent.collect_live(target, target_type)` runs the real provider lookups first — a free, no-model step — and remembers both the raw results (`last_live_results`) and how many public sources were actually contacted (`last_source_count`, from `real_source_count()`). The panel then calls `OsintHeavyAgent.build_messages(target, target_type, scope, objective, image_metadata, live_results=...)`, which stays intentionally offline: it only injects whatever `live_results` it's handed, never performs network lookups itself. This split keeps `build_messages` unit-testable without network access, and lets the UI's Sources gauge show the real contacted-source count instead of the model's self-declared "SOURCES REFERENCED" line.
+
+`target_type` from the panel is a UI label ("Email Address", "Domain / IP", "Auto-detect", …), not the lowercase token the dispatcher used to compare against directly — `_normalize_target_type()` now maps either form to the right provider (a real bug fix: live collection previously silently no-opped for any UI label other than a bare lowercase token). An "Organisation" target now resolves through `providers/company_lookup.py` (a legal-entity registry) rather than being folded into the domain/WHOIS provider.
 
 ## Under the hood — files & functions
 | Location | Role |
 |---|---|
-| `agents/osint_heavy_agent/__init__.py` | `OsintHeavyAgent` + the tool library + section spec. |
+| `agents/osint_heavy_agent/__init__.py` | `OsintHeavyAgent`: `collect_live()`, `build_messages()`, the tool library + section spec, target-type normalisation, and `real_source_count()`. |
 | `ui/panels/osint_heavy.py` | Panel, optional image workflow, structured dossier cards, and indicators. |
 | `services/local_file_search.py` | Bounded, read-only metadata search and filters. |
 | `services/remote_file_search.py` | Strict-host-key SFTP traversal for authenticated machines. |
