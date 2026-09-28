@@ -5,7 +5,7 @@ _One of Sentinel's built-in agents (`~/Documents/lab/active/sentinel_fork/agents
 `key: osint_heavy` · class: `agents/osint_heavy_agent/__init__.py → OsintHeavyAgent` · panel: `ui/panels/osint_heavy.py → OsintHeavyPanel`
 
 ## What it does
-Produces a research-grade, five-section intelligence dossier on a target, with an embedded threat score, confidence score, and a curated tradecraft tool library (~80 tools grouped by target type: people, username, email, domain/IP, breach, phone, image, archive, geolocation, social, due diligence and sanctions, cryptocurrency, news and events). Accepts an optional **image** and folds its EXIF metadata into the analysis. It also provides **Local File Discovery**, a separate read-only search for files in folders the user deliberately selects. File-search metadata never enters an AI prompt or leaves the device.
+Produces a research-grade, five-section intelligence dossier on a target, with an embedded threat score, confidence score, and a curated tradecraft tool library (~80 tools grouped by target type: people, username, email, domain/IP, breach, phone, image, archive, geolocation, social, due diligence and sanctions, cryptocurrency, news and events), topped up from the OSINT Framework catalogue. Accepts an optional **image** and folds its EXIF metadata into the analysis. It also provides **Local File Discovery**, a separate read-only search for files in folders the user deliberately selects. File-search metadata never enters an AI prompt or leaves the device.
 
 ## Inputs (panel controls)
 | Control | Purpose |
@@ -43,9 +43,15 @@ arbitrary remote commands are not executed inside Sentinel or by its AI worker.
 ## Live collection
 
 Before the model is called, Bloodhound collects real public-source data for the
-target: WHOIS, DNS, crt.sh and the Wayback Machine for domains; EmailRep,
-Gravatar (by address hash), HIBP (with a key) and BreachDirectory for emails;
-URLScan for usernames; GLEIF for organisations. For domain, organisation and
+target: WHOIS, DNS, Team Cymru IP-to-ASN, Mnemonic passive DNS, crt.sh and the
+Wayback Machine for domains (SANS DShield instead of crt.sh and Wayback for
+IPs); EmailRep, Gravatar (by address hash), HIBP (with a key) and
+BreachDirectory for emails; URLScan, GitHub and Keybase for usernames; GLEIF
+and ICIJ Offshore Leaks for organisations. The prompt treats Keybase's signed
+proofs as the strongest identity link, Offshore Leaks matches as name
+similarity (being named in the leaks is not evidence of wrongdoing), and
+shared-hosting passive DNS and DShield history as not attributable to the
+target. For domain, organisation and
 email targets it also runs a **dark-web exposure check** (`providers/exposure_lookup.py`)
 — ransomware.live and Ahmia are free and always run; Intelligence X runs only
 when `INTELX_API_KEY` is set, and self-skips otherwise. Text metadata only; no
@@ -70,6 +76,18 @@ produces exactly that pattern, and it means a missing hit proves nothing. The
 prompt tells the model to treat hits as same-name accounts to corroborate, not
 as one identity.
 
+## Catalogue tools
+
+After the built-in library, the system prompt adds tools from the **OSINT
+Framework catalogue** (osintframework.com, MIT licence) for the target type:
+10 for a Quick Scan, 25 for Standard, 45 for a Deep Dive. Only tools the
+catalogue marks live and not deprecated are used, shadow libraries are
+blocked, and hosts already in the built-in library are skipped. Each line is
+tagged with pricing, account and API needs; tools marked **ACTIVE** interact
+with the target, and the prompt requires the dossier to say so wherever it
+recommends one. The catalogue shares Trace's weekly cache in
+`data/cache/osint-framework.json`; prompt building never downloads it.
+
 ## Outputs — the dossier (exact section headers the parser keys off)
 `## 1. OVERVIEW` (with `THREAT LEVEL: X/10`, `CONFIDENCE: X%`, `SOURCES REFERENCED: X`) · `## 2. DIGITAL FOOTPRINT` · `## 3. INFRASTRUCTURE / SOCIAL PROFILE` · `## 4. RISK & RED FLAGS` · `## 5. METHODOLOGY & TOOLS`. Sidebar indicators (threat bar, confidence, sources) are regex-parsed from those exact lines.
 
@@ -83,6 +101,7 @@ Live collection and message-building are separate calls. `OsintHeavyAgent.collec
 |---|---|
 | `agents/osint_heavy_agent/__init__.py` | `OsintHeavyAgent`: `collect_live()`, `build_messages()`, the tool library + section spec, target-type normalisation, and `real_source_count()`. |
 | `providers/whatsmyname.py` | Deep Dive username sweep: site-list cache, per-site check, bounded parallel sweep. |
+| `services/osint_catalog.py` | OSINT Framework catalogue: weekly cached download, filtering, and per-agent tool selection. |
 | `ui/workers.py: LiveCollectionWorker` | Runs live collection without freezing the interface. |
 | `ui/panels/osint_heavy.py` | Panel, optional image workflow, structured dossier cards, and indicators. |
 | `services/local_file_search.py` | Bounded, read-only metadata search and filters. |
