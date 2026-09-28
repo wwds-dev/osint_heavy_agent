@@ -7,7 +7,8 @@ LIVE OSINT DATA
 ─────────────────────────────────────────────
 When the user message contains a LIVE OSINT DATA block, treat every value in it as a confirmed, verified fact collected by automated tooling moments before this analysis. You must:
   • Weave the real data directly into sections 1–4 (do not relegate it to an appendix).
-  • Attribute each finding to its source: (WHOIS), (DNS), (crt.sh), (Wayback), (EmailRep), (Gravatar), (HIBP), (BreachDirectory), (URLScan), (WhatsMyName), (GLEIF).
+  • Attribute each finding to its source: (WHOIS), (DNS), (crt.sh), (Wayback), (EmailRep), (Gravatar), (HIBP), (BreachDirectory), (URLScan), (WhatsMyName), (GLEIF), (Ransomware.live), (Ahmia), (Intelligence X).
+  • A Ransomware.live hit tagged match "victim-name" or "domain" means the target itself was posted on a ransomware group's leak site — treat that as a probable breach and lead section 4 with it. A "description-only" match is a mention in another victim's post, not the target's own exposure. Ahmia and Intelligence X hits are dark-web / leak index matches to corroborate, not confirmed compromises.
   • WhatsMyName hits mean a profile URL answered with that site's "account exists" signature. That is an account with the same name, not proof it belongs to the target: present hits as leads to corroborate, and never merge them into one identity without a linking fact (shared avatar, bio, link, or email). A missing hit proves nothing when the sweep carries a network_warning or many inconclusive sites — say so.
   • A Gravatar profile is published by its owner and keyed by the email hash, so its name, links and verified accounts are a strong pivot — but still self-declared.
   • Where a field is null or missing, note it as a confirmed gap requiring manual follow-up.
@@ -204,6 +205,7 @@ try:
     from providers import email_lookup    as _email_prov
     from providers import username_lookup as _username_prov
     from providers import company_lookup  as _company_prov
+    from providers import exposure_lookup as _exposure_prov
     _PROVIDERS_OK = True
 except ImportError:
     _PROVIDERS_OK = False
@@ -308,6 +310,16 @@ def _run_providers(target: str, target_type: str, scope: str = "", *,
         return _username_prov.lookup(
             handle, whatsmyname=deep, on_sweep_progress=sweep_progress, **tracking)
 
+    def exposure_lookup(kind_label: str) -> None:
+        """Append a dark-web exposure check (leak / ransomware sites) for a
+        domain, organisation or email. Free sources always run; Intelligence X
+        self-skips unless INTELX_API_KEY is set."""
+        try:
+            collected.append(_exposure_prov.lookup(target, kind_label, **tracking))
+        except Exception as exc:
+            collected.append({"type": "exposure", "query": target,
+                               "error": f"provider exception: {exc}"})
+
     # ── Domain / IP ────────────────────────────────────────────────────────
     if tt == "domain":
         try:
@@ -315,6 +327,7 @@ def _run_providers(target: str, target_type: str, scope: str = "", *,
         except Exception as exc:
             collected.append({"type": "domain", "query": target,
                                "error": f"provider exception: {exc}"})
+        exposure_lookup("Domain")
 
     # ── Organisation — use the legal-entity registry, not domain WHOIS ──────
     elif tt == "organisation":
@@ -323,6 +336,7 @@ def _run_providers(target: str, target_type: str, scope: str = "", *,
         except Exception as exc:
             collected.append({"type": "company", "query": target,
                                "error": f"provider exception: {exc}"})
+        exposure_lookup("Company")
 
     # ── Email ──────────────────────────────────────────────────────────────
     elif tt == "email":
@@ -331,6 +345,7 @@ def _run_providers(target: str, target_type: str, scope: str = "", *,
         except Exception as exc:
             collected.append({"type": "email", "query": target,
                                "error": f"provider exception: {exc}"})
+        exposure_lookup("Email")
 
     # ── Username ───────────────────────────────────────────────────────────
     elif tt == "username":
@@ -428,8 +443,11 @@ class OsintHeavyAgent:
                 + "\n────────────────────────────────────────────────────────────────────\n"
                 "Treat every value above as a confirmed fact. Attribute each finding to its "
                 "source tag (WHOIS / DNS / crt.sh / Wayback / EmailRep / Gravatar / HIBP / "
-                "BreachDirectory / URLScan / WhatsMyName / GLEIF). Any field showing "
-                "an \"error\" value is a collection gap — recommend the manual equivalent."
+                "BreachDirectory / URLScan / WhatsMyName / GLEIF / Ransomware.live / Ahmia / "
+                "Intelligence X). A Ransomware.live \"exposure\" block with a direct victim "
+                "match means the target was posted on a ransomware leak site — surface it "
+                "prominently. Any field showing an \"error\" value is a collection gap — "
+                "recommend the manual equivalent."
             )
 
         if image_metadata.strip():

@@ -45,7 +45,11 @@ arbitrary remote commands are not executed inside Sentinel or by its AI worker.
 Before the model is called, Bloodhound collects real public-source data for the
 target: WHOIS, DNS, crt.sh and the Wayback Machine for domains; EmailRep,
 Gravatar (by address hash), HIBP (with a key) and BreachDirectory for emails;
-URLScan for usernames; GLEIF for organisations. Phone and person-name targets
+URLScan for usernames; GLEIF for organisations. For domain, organisation and
+email targets it also runs a **dark-web exposure check** (`providers/exposure_lookup.py`)
+— ransomware.live and Ahmia are free and always run; Intelligence X runs only
+when `INTELX_API_KEY` is set, and self-skips otherwise. Text metadata only; no
+onion site is contacted and nothing is downloaded. Phone and person-name targets
 contact nothing. The permission check runs **first**, so a request the guard
 refuses never sends the target anywhere, and collection runs on a worker thread
 with progress in the status line. Stop during collection cancels it, closes the
