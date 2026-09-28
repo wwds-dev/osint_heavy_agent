@@ -11,7 +11,9 @@ When the user message contains a LIVE OSINT DATA block, treat every value in it 
   • A Ransomware.live hit tagged match "victim-name" or "domain" means the target itself was posted on a ransomware group's leak site — treat that as a probable breach and lead section 4 with it. A "description-only" match is a mention in another victim's post, not the target's own exposure. Ahmia and Intelligence X hits are dark-web / leak index matches to corroborate, not confirmed compromises.
   • WhatsMyName hits mean a profile URL answered with that site's "account exists" signature. That is an account with the same name, not proof it belongs to the target: present hits as leads to corroborate, and never merge them into one identity without a linking fact (shared avatar, bio, link, or email). A missing hit proves nothing when the sweep carries a network_warning or many inconclusive sites — say so.
   • A Gravatar profile is published by its owner and keyed by the email hash, so its name, links and verified accounts are a strong pivot — but still self-declared.
-  • Also cite (Team Cymru), (Passive DNS), (DShield), (GitHub), (Keybase) and (ICIJ Offshore Leaks) when their data appears.
+  • Also cite (Team Cymru), (Passive DNS), (DShield), (GitHub), (Keybase), (ICIJ Offshore Leaks), (OpenSanctions), (Blockstream) and (Blockscout) when their data appears.
+  • OpenSanctions matches are text matches: compare country, registration and dates before treating one as the target, and distinguish listed=true (the entity itself is sanctioned or on a watchlist) from a mere relation to a listed entity. A skipped OpenSanctions check means no API key, not a clean result.
+  • For a CRYPTO ADDRESS target, the on-chain data shows what the address did, never who controls it. Exchange and custodial addresses pool many users' funds. Do not name an owner unless a source outside the chain links them (an ENS name is self-chosen, a public tag is the explorer's label), and use sections 2–3 for flows, counterparties and timing rather than personal details.
   • Keybase verified_accounts are cryptographically signed proofs that one person controls those accounts: the strongest identity link in the data. A GitHub profile with the same handle is only as linked as its own fields (name, blog, email) make it.
   • ICIJ Offshore Leaks matches are name similarity, not identity. Being named in the leaks is not evidence of wrongdoing; report a match as a lead, with its similarity score and source leak, never as a finding against the target.
   • Passive DNS and DShield describe infrastructure history. A shared-hosting or CDN address carries thousands of unrelated names and reports, so do not attribute them to the target.
@@ -213,6 +215,7 @@ try:
     from providers import username_lookup  as _username_prov
     from providers import company_lookup   as _company_prov
     from providers import exposure_lookup  as _exposure_prov
+    from providers import crypto_lookup    as _crypto_prov
     _PROVIDERS_OK = True
 except ImportError:
     _PROVIDERS_OK = False
@@ -228,6 +231,9 @@ def _detect_from_target(target: str) -> str:
     text = (target or "").strip()
     if not text:
         return "unknown"
+    # Before the username fallback: a Bitcoin address is also a valid handle.
+    if _PROVIDERS_OK and _crypto_prov.chain_of(text):
+        return "crypto"
     if _EMAIL_RE.match(text):
         return "email"
     if _IPV4_RE.match(text):
@@ -264,6 +270,8 @@ def _normalize_target_type(target: str, target_type: str) -> str:
         return "person"
     if "phone" in compact:
         return "phone"
+    if "crypto" in compact or "wallet" in compact or "bitcoin" in compact:
+        return "crypto"
     return _detect_from_target(target)
 
 
@@ -339,7 +347,8 @@ def _run_providers(target: str, target_type: str, scope: str = "", *,
     # ── Organisation — use the legal-entity registry, not domain WHOIS ──────
     elif tt == "organisation":
         try:
-            collected.append(_company_prov.lookup(target, offshore_leaks=True, **tracking))
+            collected.append(_company_prov.lookup(
+                target, offshore_leaks=True, sanctions=True, **tracking))
         except Exception as exc:
             collected.append({"type": "company", "query": target,
                                "error": f"provider exception: {exc}"})
@@ -380,6 +389,14 @@ def _run_providers(target: str, target_type: str, scope: str = "", *,
                 collected.append({"type": "username", "query": target,
                                    "error": f"provider exception: {exc}"})
 
+    # ── Cryptocurrency address ────────────────────────────────────────────
+    elif tt == "crypto":
+        try:
+            collected.append(_crypto_prov.lookup(target, **tracking))
+        except Exception as exc:
+            collected.append({"type": "crypto", "query": target,
+                               "error": f"provider exception: {exc}"})
+
     # ── Phone / other ──────────────────────────────────────────────────────
     # No zero-cost provider available (people-search / phone brokers are
     # deliberately not used); return empty so the LLM falls back to its
@@ -402,7 +419,7 @@ def _catalog_kind(target: str, target_type: str) -> str | None:
         except ValueError:
             return "domain"
     return {"organisation": "company", "email": "email", "username": "username",
-            "phone": "phone", "person": "person"}.get(canonical)
+            "phone": "phone", "person": "person", "crypto": "crypto"}.get(canonical)
 
 
 def catalog_block(target: str, target_type: str, scope: str) -> str:
