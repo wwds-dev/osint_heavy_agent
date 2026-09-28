@@ -7,7 +7,9 @@ LIVE OSINT DATA
 ─────────────────────────────────────────────
 When the user message contains a LIVE OSINT DATA block, treat every value in it as a confirmed, verified fact collected by automated tooling moments before this analysis. You must:
   • Weave the real data directly into sections 1–4 (do not relegate it to an appendix).
-  • Attribute each finding to its source: (WHOIS), (DNS), (crt.sh), (EmailRep), (URLScan).
+  • Attribute each finding to its source: (WHOIS), (DNS), (crt.sh), (Wayback), (EmailRep), (Gravatar), (HIBP), (BreachDirectory), (URLScan), (WhatsMyName), (GLEIF).
+  • WhatsMyName hits mean a profile URL answered with that site's "account exists" signature. That is an account with the same name, not proof it belongs to the target: present hits as leads to corroborate, and never merge them into one identity without a linking fact (shared avatar, bio, link, or email). A missing hit proves nothing when the sweep carries a network_warning or many inconclusive sites — say so.
+  • A Gravatar profile is published by its owner and keyed by the email hash, so its name, links and verified accounts are a strong pivot — but still self-declared.
   • Where a field is null or missing, note it as a confirmed gap requiring manual follow-up.
   • Where a field shows an "error" value, flag it as a collection failure and recommend the equivalent manual tool.
   • Never contradict the live data with speculation.
@@ -105,7 +107,11 @@ DOMAIN / IP / INFRASTRUCTURE:
 - AbuseIPDB: https://abuseipdb.com — IP abuse and threat reporting database
 - GreyNoise: https://greynoise.io — IP noise classification (scanner vs targeted)
 - WHOIS: https://who.is — domain registration history and registrant data
-- Spyse: https://spyse.com — infrastructure intelligence platform
+- Whoxy: https://www.whoxy.com — WHOIS history and reverse WHOIS by registrant name, email, or company
+- DNSDB Scout: https://scout.dnsdb.info — passive DNS history (what a name resolved to, and when)
+- Pulsedive: https://pulsedive.com — IOC enrichment: risk score, linked indicators, threat feeds
+- abuse.ch Hunting: https://hunting.abuse.ch — search URLhaus, ThreatFox and MalwareBazaar for a domain, IP, or hash
+- urlDNA: https://urldna.io — sandboxed URL scan with screenshot, certificate, and page DOM
 
 BREACH DATA / LEAKED CREDENTIALS:
 - Have I Been Pwned: https://haveibeenpwned.com — breach exposure by email
@@ -135,6 +141,7 @@ WEB ARCHIVE:
 
 GEOLOCATION:
 - GeoSpy: https://geospy.web.app — AI-powered image geolocation
+- WiGLE: https://wigle.net — Wi-Fi network (SSID/BSSID) sightings on a map; places a device or network
 - SunCalc: https://suncalc.org — sun angle analysis for image time/location
 - Bellingcat Toolkit: https://bellingcat.gitbook.io/toolkit — geolocation and verification tools
 
@@ -142,7 +149,22 @@ SOCIAL MEDIA SEARCH:
 - Social Searcher: https://social-searcher.com — multi-platform social media monitoring
 - Reddit Search: https://www.reddit.com/search — Reddit post and user search
 - Twitter/X Advanced: https://twitter.com/search-advanced — advanced Twitter search
-- Twint: https://github.com/twintproject/twint — offline Twitter OSINT scraper
+
+DUE DILIGENCE / SANCTIONS / NETWORKS:
+- OpenSanctions: https://www.opensanctions.org — sanctions lists, politically exposed persons, and wanted lists in one search
+- OCCRP Aleph: https://aleph.occrp.org — leaked documents, company registries, and court records from investigative journalism
+- LittleSis: https://littlesis.org — who-knows-who map of board seats, donors, and lobbying ties
+- Transparenzregister: https://www.transparenzregister.de — German beneficial-ownership register (access requires justified interest)
+
+CRYPTOCURRENCY:
+- Blockchain.com Explorer: https://www.blockchain.com/explorer — Bitcoin address balance and transaction history
+- Etherscan: https://etherscan.io — Ethereum address, token, and contract activity
+- WalletExplorer: https://www.walletexplorer.com — Bitcoin address clustering into wallets and named services
+- BlockCypher: https://live.blockcypher.com — multi-chain explorer (BTC, LTC, DOGE, DASH)
+- Chainabuse: https://www.chainabuse.com — community scam and fraud reports by wallet address
+
+NEWS & EVENTS:
+- GDELT: https://www.gdeltproject.org — global news-event database; search coverage of a person, company, or place over time
 
 GOOGLE DORKS & SEARCH OPERATORS:
 - Google: https://google.com — use operators: site:, filetype:, inurl:, intitle:, "exact phrase"
@@ -249,7 +271,8 @@ def real_source_count(live_results: list[dict]) -> int:
     return total
 
 
-def _run_providers(target: str, target_type: str) -> list[dict]:
+def _run_providers(target: str, target_type: str, scope: str = "", *,
+                   on_progress=None, should_stop=None) -> list[dict]:
     """
     Dispatch live lookups based on target_type.
 
@@ -257,17 +280,38 @@ def _run_providers(target: str, target_type: str) -> list[dict]:
     never raised — collection must not crash on provider failures). Accepts
     either a UI label ("Email Address", "Domain / IP", "Auto-detect", …) or a
     bare canonical token; both are normalised first.
+
+    A Deep Dive on a username also sweeps the WhatsMyName site list (several
+    hundred profile URLs, up to a minute); lighter scopes leave it out.
+    ``on_progress(message)`` receives one human-readable line per step.
     """
     if not _PROVIDERS_OK:
         return []
 
     collected: list[dict] = []
     tt = _normalize_target_type(target, target_type)
+    deep = scope == "Deep Dive"
+
+    def report(message: str) -> None:
+        if on_progress:
+            on_progress(message)
+
+    def source_progress(source: str, status: str) -> None:
+        report(f"{source}: {status}")
+
+    def sweep_progress(done: int, total: int) -> None:
+        report(f"WhatsMyName: {done} of {total} sites checked")
+
+    tracking = {"on_progress": source_progress, "should_stop": should_stop}
+
+    def username_lookup(handle: str) -> dict:
+        return _username_prov.lookup(
+            handle, whatsmyname=deep, on_sweep_progress=sweep_progress, **tracking)
 
     # ── Domain / IP ────────────────────────────────────────────────────────
     if tt == "domain":
         try:
-            collected.append(_domain_prov.lookup(target))
+            collected.append(_domain_prov.lookup(target, **tracking))
         except Exception as exc:
             collected.append({"type": "domain", "query": target,
                                "error": f"provider exception: {exc}"})
@@ -275,7 +319,7 @@ def _run_providers(target: str, target_type: str) -> list[dict]:
     # ── Organisation — use the legal-entity registry, not domain WHOIS ──────
     elif tt == "organisation":
         try:
-            collected.append(_company_prov.lookup(target))
+            collected.append(_company_prov.lookup(target, **tracking))
         except Exception as exc:
             collected.append({"type": "company", "query": target,
                                "error": f"provider exception: {exc}"})
@@ -283,7 +327,7 @@ def _run_providers(target: str, target_type: str) -> list[dict]:
     # ── Email ──────────────────────────────────────────────────────────────
     elif tt == "email":
         try:
-            collected.append(_email_prov.lookup(target))
+            collected.append(_email_prov.lookup(target, **tracking))
         except Exception as exc:
             collected.append({"type": "email", "query": target,
                                "error": f"provider exception: {exc}"})
@@ -291,7 +335,7 @@ def _run_providers(target: str, target_type: str) -> list[dict]:
     # ── Username ───────────────────────────────────────────────────────────
     elif tt == "username":
         try:
-            collected.append(_username_prov.lookup(target))
+            collected.append(username_lookup(target))
         except Exception as exc:
             collected.append({"type": "username", "query": target,
                                "error": f"provider exception: {exc}"})
@@ -301,14 +345,15 @@ def _run_providers(target: str, target_type: str) -> list[dict]:
         # If the target string looks like an email, check EmailRep
         if "@" in target and "." in target.split("@")[-1]:
             try:
-                collected.append(_email_prov.lookup(target))
+                collected.append(_email_prov.lookup(target, **tracking))
             except Exception as exc:
                 collected.append({"type": "email", "query": target,
                                    "error": f"provider exception: {exc}"})
         # If it looks like a standalone username (no spaces, no @), try URLScan
+        # (and, on a Deep Dive, the WhatsMyName sweep)
         if " " not in target and "@" not in target:
             try:
-                collected.append(_username_prov.lookup(target))
+                collected.append(username_lookup(target))
             except Exception as exc:
                 collected.append({"type": "username", "query": target,
                                    "error": f"provider exception: {exc}"})
@@ -329,15 +374,18 @@ class OsintHeavyAgent:
         self.last_live_results: list[dict] = []
         self.last_source_count: int = 0
 
-    def collect_live(self, target: str, target_type: str) -> list[dict]:
+    def collect_live(self, target: str, target_type: str, scope: str = "", *,
+                     on_progress=None, should_stop=None) -> list[dict]:
         """Run the real live lookups for this target and remember the outcome.
 
         Separated from ``build_messages`` so that (a) message construction stays
         offline and unit-testable without network access, and (b) the panel can
         drive the Sources gauge from the real number of sources contacted rather
-        than the model's self-declared estimate.
+        than the model's self-declared estimate. The panel runs this on a
+        worker thread; ``should_stop`` lets its Stop button end a long sweep.
         """
-        results = _run_providers(target, target_type)
+        results = _run_providers(target, target_type, scope,
+                                 on_progress=on_progress, should_stop=should_stop)
         self.last_live_results = results
         self.last_source_count = real_source_count(results)
         return results
@@ -379,7 +427,8 @@ class OsintHeavyAgent:
                 + live_json
                 + "\n────────────────────────────────────────────────────────────────────\n"
                 "Treat every value above as a confirmed fact. Attribute each finding to its "
-                "source tag (WHOIS / DNS / crt.sh / EmailRep / URLScan). Any field showing "
+                "source tag (WHOIS / DNS / crt.sh / Wayback / EmailRep / Gravatar / HIBP / "
+                "BreachDirectory / URLScan / WhatsMyName / GLEIF). Any field showing "
                 "an \"error\" value is a collection gap — recommend the manual equivalent."
             )
 
