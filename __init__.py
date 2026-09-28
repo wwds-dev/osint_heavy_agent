@@ -11,6 +11,10 @@ When the user message contains a LIVE OSINT DATA block, treat every value in it 
   • A Ransomware.live hit tagged match "victim-name" or "domain" means the target itself was posted on a ransomware group's leak site — treat that as a probable breach and lead section 4 with it. A "description-only" match is a mention in another victim's post, not the target's own exposure. Ahmia and Intelligence X hits are dark-web / leak index matches to corroborate, not confirmed compromises.
   • WhatsMyName hits mean a profile URL answered with that site's "account exists" signature. That is an account with the same name, not proof it belongs to the target: present hits as leads to corroborate, and never merge them into one identity without a linking fact (shared avatar, bio, link, or email). A missing hit proves nothing when the sweep carries a network_warning or many inconclusive sites — say so.
   • A Gravatar profile is published by its owner and keyed by the email hash, so its name, links and verified accounts are a strong pivot — but still self-declared.
+  • Also cite (Team Cymru), (Passive DNS), (DShield), (GitHub), (Keybase) and (ICIJ Offshore Leaks) when their data appears.
+  • Keybase verified_accounts are cryptographically signed proofs that one person controls those accounts: the strongest identity link in the data. A GitHub profile with the same handle is only as linked as its own fields (name, blog, email) make it.
+  • ICIJ Offshore Leaks matches are name similarity, not identity. Being named in the leaks is not evidence of wrongdoing; report a match as a lead, with its similarity score and source leak, never as a finding against the target.
+  • Passive DNS and DShield describe infrastructure history. A shared-hosting or CDN address carries thousands of unrelated names and reports, so do not attribute them to the target.
   • Where a field is null or missing, note it as a confirmed gap requiring manual follow-up.
   • Where a field shows an "error" value, flag it as a collection failure and recommend the equivalent manual tool.
   • Never contradict the live data with speculation.
@@ -197,8 +201,11 @@ TONE AND STANDARDS
 """
 
 
+import ipaddress as _ipaddress
 import json as _json
 import re as _re
+
+from services import osint_catalog as _catalog
 
 try:
     from providers import domain_lookup   as _domain_prov
@@ -332,7 +339,7 @@ def _run_providers(target: str, target_type: str, scope: str = "", *,
     # ── Organisation — use the legal-entity registry, not domain WHOIS ──────
     elif tt == "organisation":
         try:
-            collected.append(_company_prov.lookup(target, **tracking))
+            collected.append(_company_prov.lookup(target, offshore_leaks=True, **tracking))
         except Exception as exc:
             collected.append({"type": "company", "query": target,
                                "error": f"provider exception: {exc}"})
@@ -379,6 +386,52 @@ def _run_providers(target: str, target_type: str, scope: str = "", *,
     # methodology guidance and the Sources gauge honestly shows 0 contacted.
 
     return collected
+
+
+#: How many catalogue tools each scope adds to the built-in library.
+CATALOG_LIMITS = {"Quick Scan": 10, "Standard Investigation": 25, "Deep Dive": 45}
+
+
+def _catalog_kind(target: str, target_type: str) -> str | None:
+    canonical = _normalize_target_type(target, target_type)
+    if canonical == "domain":
+        host = target.strip().strip("[]")
+        try:
+            _ipaddress.ip_address(host)
+            return "ip"
+        except ValueError:
+            return "domain"
+    return {"organisation": "company", "email": "email", "username": "username",
+            "phone": "phone", "person": "person"}.get(canonical)
+
+
+def catalog_block(target: str, target_type: str, scope: str) -> str:
+    """Current tools from the cached OSINT Framework catalogue for this target.
+
+    Cache only — never the network — so build_messages stays offline. Tools
+    marked ACTIVE contact or scan the target; the prompt tells the model to
+    say so wherever it recommends one.
+    """
+    kind = _catalog_kind(target, target_type)
+    if kind is None:
+        return ""
+    picks = _catalog.select(
+        _catalog.cached_tools(), kind, audience="bloodhound",
+        limit=CATALOG_LIMITS.get(scope, 25),
+        exclude_hosts=_catalog.hosts_in(SYSTEM_PROMPT),
+    )
+    if not picks:
+        return ""
+    return (
+        "\n\n─────────────────────────────────────────────\n"
+        f"CURRENT CATALOGUE — {_catalog.ATTRIBUTION}, live and non-deprecated tools for "
+        "this target type, in addition to the library above.\n"
+        "─────────────────────────────────────────────\n"
+        "Tags give pricing, whether an account is needed, and API availability. A tool "
+        "tagged ACTIVE interacts with the target (scans, uploads, or visits it) and may be "
+        "noticed: whenever you recommend one in section 5, say so and why it is worth the "
+        "exposure.\n" + _catalog.format_block(picks)
+    )
 
 
 class OsintHeavyAgent:
@@ -464,6 +517,7 @@ class OsintHeavyAgent:
         )
 
         return [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system",
+             "content": SYSTEM_PROMPT + catalog_block(target, target_type, scope)},
             {"role": "user", "content": "\n".join(user_parts)},
         ]
