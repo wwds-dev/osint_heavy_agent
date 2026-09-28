@@ -208,11 +208,11 @@ import re as _re
 from services import osint_catalog as _catalog
 
 try:
-    from providers import domain_lookup   as _domain_prov
-    from providers import email_lookup    as _email_prov
-    from providers import username_lookup as _username_prov
-    from providers import company_lookup  as _company_prov
-    from providers import exposure_lookup as _exposure_prov
+    from providers import domain_lookup    as _domain_prov
+    from providers import email_lookup     as _email_prov
+    from providers import username_lookup  as _username_prov
+    from providers import company_lookup   as _company_prov
+    from providers import exposure_lookup  as _exposure_prov
     _PROVIDERS_OK = True
 except ImportError:
     _PROVIDERS_OK = False
