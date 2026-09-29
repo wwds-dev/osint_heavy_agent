@@ -348,7 +348,8 @@ def _run_providers(target: str, target_type: str, scope: str = "", *,
     elif tt == "organisation":
         try:
             collected.append(_company_prov.lookup(
-                target, offshore_leaks=True, sanctions=True, **tracking))
+                target, offshore_leaks=True, sanctions=True, court_records=True,
+                **tracking))
         except Exception as exc:
             collected.append({"type": "company", "query": target,
                                "error": f"provider exception: {exc}"})
