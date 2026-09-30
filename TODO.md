@@ -9,5 +9,6 @@
 
 ## v1 — current
 
+- [x] `P1` `bug` `@ai` Code-review fix (2026-09-29): auto-detect routed IPv6 addresses and `:port`/`/CIDR`-decorated IPv4 to the username / WhatsMyName sweep instead of the domain provider (which resolves IPs). Added `_looks_like_ip` (via `ipaddress`, tolerating scheme, brackets, port, CIDR and `%zone`) and check it before the username fallback.
 - [ ] `P2` `design` `@ai` The threat and confidence scores need their derivation shown. A dossier carrying a number a reader cannot trace back to evidence invites more trust than it has earned.
 - [ ] `P2` `feature` `security` `@ai` Metadata and rule matching, staged. Was one line of a four-agent "staged specialist integrations" item in the parent list, which is not a thing anyone works on. Excludes denial of service, credential theft, stealth/persistence and uncontrolled exploitation. *(split out of sentinel_fork/TODO.md)*
