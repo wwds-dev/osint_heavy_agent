@@ -224,6 +224,27 @@ except ImportError:
 _EMAIL_RE = _re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _IPV4_RE = _re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
 _DOMAIN_RE = _re.compile(r"^(?=.{1,253}$)(?:[A-Za-z0-9-]{1,63}\.)+[A-Za-z]{2,}$")
+_BRACKET_IPV6_RE = _re.compile(r"^\[([0-9A-Fa-f:]+)\](?::\d+)?$")
+
+
+def _looks_like_ip(value: str) -> bool:
+    """True for an IPv4/IPv6 address, tolerating a scheme, a /CIDR suffix, a
+    :port, [..]-bracketed IPv6, and an IPv6 %zone. The domain provider resolves
+    IPs, so an auto-detected address must route there, not to the username sweep.
+    """
+    v = value.strip()
+    match = _BRACKET_IPV6_RE.match(v)
+    if match:
+        v = match.group(1)
+    else:
+        v = v.split("//")[-1].split("/")[0]  # drop scheme and any /CIDR
+        if v.count(":") == 1:                # a single colon is host:port
+            v = v.rsplit(":", 1)[0]
+    try:
+        _ipaddress.ip_address(v.split("%")[0])
+        return True
+    except ValueError:
+        return False
 
 
 def _detect_from_target(target: str) -> str:
@@ -236,8 +257,10 @@ def _detect_from_target(target: str) -> str:
         return "crypto"
     if _EMAIL_RE.match(text):
         return "email"
-    if _IPV4_RE.match(text):
-        return "domain"  # the domain provider resolves IPs too
+    # IPs (v4/v6, incl. :port, /CIDR, [..], %zone) resolve via the domain
+    # provider; check before the username fallback so they are not mis-routed.
+    if _looks_like_ip(text):
+        return "domain"
     host = text.split("//")[-1].split("/")[0].split("@")[-1].split(":")[0]
     if _DOMAIN_RE.match(host):
         return "domain"
