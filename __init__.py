@@ -222,8 +222,38 @@ except ImportError:
 
 
 _EMAIL_RE = _re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-_IPV4_RE = _re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
 _DOMAIN_RE = _re.compile(r"^(?=.{1,253}$)(?:[A-Za-z0-9-]{1,63}\.)+[A-Za-z]{2,}$")
+_SCHEME_RE = _re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
+_BRACKET_RE = _re.compile(r"^\[([^\]]+)\](?::\d+)?$")
+
+
+def _extract_ip(value: str) -> str | None:
+    """Return the bare IPv4/IPv6 address in ``value``, or None if it is not an IP.
+
+    Tolerates, in any combination: a scheme, ``[..]``-bracketed IPv6, a ``:port``
+    (numeric only), a ``/CIDR`` suffix, and an IPv6 ``%zone``.
+    """
+    v = _SCHEME_RE.sub("", (value or "").strip())  # drop scheme
+    v = v.split("/", 1)[0]                          # drop /CIDR (or path)
+    match = _BRACKET_RE.match(v)
+    if match:
+        v = match.group(1)                          # [IPv6] or [IPv6]:port
+    elif v.count(":") == 1:                         # host:port for IPv4/hostname
+        head, port = v.rsplit(":", 1)
+        if port.isdigit():
+            v = head
+    v = v.split("%", 1)[0]                           # drop IPv6 %zone
+    try:
+        return str(_ipaddress.ip_address(v))
+    except ValueError:
+        return None
+
+
+def _looks_like_ip(value: str) -> bool:
+    """True for an IPv4/IPv6 address (see _extract_ip). The domain provider
+    resolves IPs, so an auto-detected address must route there, not to the
+    username sweep."""
+    return _extract_ip(value) is not None
 
 
 def _detect_from_target(target: str) -> str:
@@ -236,8 +266,10 @@ def _detect_from_target(target: str) -> str:
         return "crypto"
     if _EMAIL_RE.match(text):
         return "email"
-    if _IPV4_RE.match(text):
-        return "domain"  # the domain provider resolves IPs too
+    # IPs (v4/v6, incl. :port, /CIDR, [..], %zone) resolve via the domain
+    # provider; check before the username fallback so they are not mis-routed.
+    if _looks_like_ip(text):
+        return "domain"
     host = text.split("//")[-1].split("/")[0].split("@")[-1].split(":")[0]
     if _DOMAIN_RE.match(host):
         return "domain"
@@ -413,12 +445,9 @@ CATALOG_LIMITS = {"Quick Scan": 10, "Standard Investigation": 25, "Deep Dive": 4
 def _catalog_kind(target: str, target_type: str) -> str | None:
     canonical = _normalize_target_type(target, target_type)
     if canonical == "domain":
-        host = target.strip().strip("[]")
-        try:
-            _ipaddress.ip_address(host)
-            return "ip"
-        except ValueError:
-            return "domain"
+        # Reuse the same IP extraction as detection, so a decorated address
+        # (:port, /CIDR, [..], %zone) selects the IP catalogue, not the domain one.
+        return "ip" if _extract_ip(target) else "domain"
     return {"organisation": "company", "email": "email", "username": "username",
             "phone": "phone", "person": "person", "crypto": "crypto"}.get(canonical)
 
