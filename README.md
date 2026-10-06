@@ -1,6 +1,6 @@
 # BLOODHOUND — Deep OSINT investigation
 
-_One of Sentinel's built-in agents (`~/Documents/lab/active/sentinel_fork/agents/osint_heavy_agent/`). Split out into its own project on 2026-09-14 — see the parent project's README.md for how Sentinel's agent roster fits together._
+_One of Sentinel's built-in agents (`~/Documents/lab/active/sentinel/agents/osint_heavy_agent/`). Split out into its own project on 2026-09-14 — see the parent project's README.md for how Sentinel's agent roster fits together._
 
 `key: osint_heavy` · class: `agents/osint_heavy_agent/__init__.py → OsintHeavyAgent` · panel: `ui/panels/osint_heavy.py → OsintHeavyPanel`
 
