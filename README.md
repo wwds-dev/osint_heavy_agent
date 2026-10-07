@@ -11,8 +11,8 @@ Produces a research-grade, five-section intelligence dossier on a target, with a
 | Control | Purpose |
 |---|---|
 | Target identifier | Person / username / email / domain / IP / organisation. |
-| Target type | Guides which tool families and pivots are emphasised. **Crypto Address** takes a Bitcoin or Ethereum address; Auto-detect recognises both. |
-| Scope | `Quick Scan` (3–5 pts/section), `Standard`, or `Deep Dive` (exhaustive). |
+| Target type | Guides which tool families and pivots are emphasised. **Crypto Address** takes a Bitcoin or Ethereum address. **Auto-detect** tries, in order: crypto address, email, IP address, domain, then username (no spaces) or person. An IPv4 or IPv6 address is recognised even with a scheme, `:port` (numeric only), `/CIDR`, `[..]` brackets or a `%zone` (`_extract_ip`), so it goes to the domain/IP provider and picks the IP catalogue rather than the username sweep. |
+| Scope | `Quick Scan` (3–5 pts/section), `Standard Investigation`, or `Deep Dive` (exhaustive). |
 | Objective / context | Free-text investigation goal. |
 | Add target image | Optional collapsed section; EXIF is parsed and injected into the prompt. |
 | Model override | Optional provider/model change; a long-context reasoning model is selected by default. |
@@ -44,17 +44,24 @@ arbitrary remote commands are not executed inside Sentinel or by its AI worker.
 
 Before the model is called, Bloodhound collects real public-source data for the
 target: WHOIS, DNS, Team Cymru IP-to-ASN, Mnemonic passive DNS, crt.sh and the
-Wayback Machine for domains (SANS DShield instead of crt.sh and Wayback for
-IPs); EmailRep, Gravatar (by address hash), HIBP (with a key) and
-BreachDirectory for emails; URLScan, GitHub and Keybase for usernames; GLEIF
-and ICIJ Offshore Leaks for organisations. The prompt treats Keybase's signed
+Wayback Machine for domains (for IPs, SANS DShield and Shodan InternetDB
+instead of crt.sh and Wayback, plus IPinfo with `IPINFO_API_KEY` and Criminal
+IP with `CRIMINALIP_API_KEY` — each omitted without its key); EmailRep,
+Gravatar (by address hash), HIBP (with a key) and BreachDirectory for emails;
+URLScan, GitHub and Keybase for usernames; GLEIF, ICIJ Offshore Leaks and
+CourtListener court dockets for organisations. CourtListener works without a
+key (`COURTLISTENER_API_KEY` only raises the rate limit) and returns docket
+metadata only, never filing text or PDFs; a name match is a lead, not proof the
+case concerns the target. The prompt treats Keybase's signed
 proofs as the strongest identity link, Offshore Leaks matches as name
 similarity (being named in the leaks is not evidence of wrongdoing), and
 shared-hosting passive DNS and DShield history as not attributable to the
 target. For domain, organisation and
 email targets it also runs a **dark-web exposure check** (`providers/exposure_lookup.py`)
 — ransomware.live and Ahmia are free and always run; Intelligence X runs only
-when `INTELX_API_KEY` is set, and self-skips otherwise. Text metadata only; no
+when `INTELX_API_KEY` is set and DeHashed (breach names and counts for emails
+and domains, never leaked passwords or hashes) only when `DEHASHED_API_KEY` is
+set; each reports itself as skipped otherwise. Text metadata only; no
 onion site is contacted and nothing is downloaded. Phone and person-name targets
 contact nothing. The permission check runs **first**, so a request the guard
 refuses never sends the target anywhere, and collection runs on a worker thread
@@ -101,7 +108,7 @@ skipped check is reported as "no key", not as a clean result.
 
 After the built-in library, the system prompt adds tools from the **OSINT
 Framework catalogue** (osintframework.com, MIT licence) for the target type:
-10 for a Quick Scan, 25 for Standard, 45 for a Deep Dive. Only tools the
+10 for a Quick Scan, 25 for a Standard Investigation, 45 for a Deep Dive. Only tools the
 catalogue marks live and not deprecated are used, shadow libraries are
 blocked, and hosts already in the built-in library are skipped. Each line is
 tagged with pricing, account and API needs; tools marked **ACTIVE** interact
